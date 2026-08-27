@@ -11,6 +11,7 @@ import importRouter       from "./import.js";
 import uploadRouter       from "./upload.js";
 import pricesRouter       from "./prices.js";
 import ebayRouter         from "./ebay.js";
+import psaRouter          from "./psa.js";
 
 const v1 = Router();
 
@@ -33,5 +34,6 @@ v1.use("/import",       importRouter);
 v1.use("/upload",       uploadRouter);
 v1.use("/prices",       pricesRouter);
 v1.use("/ebay",         ebayRouter);
+v1.use("/psa",          psaRouter);
 
 export default v1;

@@ -18,12 +18,14 @@ const envSchema = z.object({
   RATE_LIMIT_WINDOW_MS: z.coerce.number().default(60_000),   // 1 minute
   RATE_LIMIT_MAX:       z.coerce.number().default(120),      // requests per window
   AI_RATE_LIMIT_MAX:    z.coerce.number().default(10),       // AI scan is expensive
+  PSA_RATE_LIMIT_MAX:   z.coerce.number().default(10),       // PSA free tier is 100 calls/day
 
   // Redis (optional — falls back to in-process memory store)
   REDIS_URL: z.string().optional(),
 
   // Secrets
   PRICECHARTING_TOKEN: z.string().optional(),
+  PSA_API_TOKEN:       z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

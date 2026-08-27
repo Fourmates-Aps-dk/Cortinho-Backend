@@ -49,3 +49,16 @@ export const authLimiter = rateLimit({
   keyGenerator:     (req) => ipKeyGenerator(req.ip || '0.0.0.0'),
   handler,
 });
+
+// ── PSA lookup limiter ────────────────────────────────────────
+// PSA's free tier allows 100 calls/day. Cache hits don't reach PSA, but
+// cap uncached bursts anyway. 10 req / 1 min per user.
+export const psaLimiter = rateLimit({
+  windowMs:         env.RATE_LIMIT_WINDOW_MS,
+  max:              env.PSA_RATE_LIMIT_MAX,
+  standardHeaders:  "draft-7",
+  legacyHeaders:    false,
+  keyGenerator:     (req) => req.userId || ipKeyGenerator(req.ip || '0.0.0.0'),
+  handler,
+  skip:             (req) => env.NODE_ENV === "test",
+});
