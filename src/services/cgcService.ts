@@ -2,6 +2,8 @@ import { db } from "../../db.js";
 import { cgcCertCache, gradingCompanies } from "../../drizzle/schema.js";
 import { eq } from "drizzle-orm";
 import { logger } from "../logger/index.js";
+import { env } from "../config/env.js";
+import { cached } from "../cache/index.js";
 import { z } from "zod";
 
 // CGC has no official public API. This goes through parse.bot, a managed
@@ -29,8 +31,8 @@ export const cgcToCardSchema = z.object({
   currentValue:      z.number().min(0).optional(),
   purchaseDate:      z.string().optional(),
   acquisitionMethod: z.enum(["bought","pulled","trade","gift","other"]).optional(),
-  imageUrl:          z.string().url().optional(),
-  imageBackUrl:      z.string().url().optional(),
+  imageUrl:          z.url().optional(),
+  imageBackUrl:      z.url().optional(),
   notes:             z.string().optional(),
   isPublic:          z.boolean().optional(),
   status:            z.enum(["collection","wishlist","for_sale","sold","traded","draft"]).optional(),
@@ -60,9 +62,17 @@ export interface CgcCert {
   images?:       CgcImage[];
 }
 
+export interface CgcGradeCount {
+  grade: string;
+  count: number;
+}
+
 export interface CgcPopulation {
   total:  number | null;
+  /** Copies graded above this card. Null when its grade isn't on the ladder. */
   higher: number | null;
+  /** Full descending ladder as returned upstream — we paid for it, so keep it. */
+  ladder?: CgcGradeCount[];
 }
 
 export interface CgcLookupResult {
@@ -204,46 +214,73 @@ export async function toCardFields(cert: CgcCert): Promise<CgcCardFields> {
 // ── Upstream calls ────────────────────────────────────────────
 
 export function isCgcConfigured(): boolean {
-  return Boolean(process.env.PARSE_API_KEY && process.env.PARSE_CGC_SCRAPER_ID);
+  return Boolean(env.PARSE_API_KEY && env.PARSE_CGC_SCRAPER_ID);
 }
 
+// Measured against the live scraper: lookup_cert 14-27s, get_card_population
+// 27-64s (and it returns 500s under load). These are page scrapes upstream, not
+// API reads, so the budgets are generous and per-endpoint.
+const TIMEOUT_MS: Record<string, number> = {
+  lookup_cert:         60_000,
+  get_card_population: 90_000,
+};
+
+// Observed failure mode: roughly one call in four stalls ~60s and returns 500,
+// while an immediate retry succeeds in ~14s. Looks like a cold scrape upstream.
+// One retry converts that from a user-visible error into a slow success.
+const MAX_ATTEMPTS = 2;
+
 async function parseBotGet<T>(endpoint: string, params: Record<string, string>): Promise<T> {
-  const apiKey    = process.env.PARSE_API_KEY;
-  const scraperId = process.env.PARSE_CGC_SCRAPER_ID;
+  const apiKey    = env.PARSE_API_KEY;
+  const scraperId = env.PARSE_CGC_SCRAPER_ID;
   if (!apiKey || !scraperId) throw new CgcError("CGC lookup not configured on this server", 503);
 
   const url = new URL(`${PARSE_BASE}/${scraperId}/${endpoint}`);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
 
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      headers: { "X-API-Key": apiKey },
-      signal:  AbortSignal.timeout(20_000),
-    });
-  } catch (err) {
-    logger.error({ err, endpoint }, "parse.bot request failed");
-    throw new CgcError("CGC lookup service unreachable", 502);
+  let lastError: CgcError = new CgcError("CGC lookup failed", 502);
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        headers: { "X-API-Key": apiKey },
+        signal:  AbortSignal.timeout(TIMEOUT_MS[endpoint] ?? 60_000),
+      });
+    } catch (err) {
+      logger.warn({ err, endpoint, attempt }, "parse.bot request failed");
+      lastError = new CgcError("CGC lookup service unreachable", 502);
+      continue;   // timeouts are the retryable case
+    }
+
+    // Terminal — retrying can't help and each attempt costs a credit.
+    if (res.status === 401 || res.status === 403) {
+      throw new CgcError("parse.bot rejected the API key", 502);
+    }
+    if (res.status === 402) {
+      throw new CgcError("parse.bot credits exhausted", 502);
+    }
+    if (res.status === 429) {
+      throw new CgcError("CGC lookup rate limit reached. Try again later.", 429);
+    }
+
+    if (res.status >= 500) {
+      logger.warn({ endpoint, attempt, status: res.status }, "parse.bot 5xx — retrying");
+      lastError = new CgcError(`CGC lookup service returned ${res.status}`, 502);
+      continue;
+    }
+    if (!res.ok) {
+      throw new CgcError(`CGC lookup service returned ${res.status}`, 502);
+    }
+
+    const body = (await res.json()) as { status?: string; data?: T; error?: string };
+    if (body.status !== "success" || !body.data) {
+      throw new CgcError(body.error || "CGC lookup returned no data", 502);
+    }
+    return body.data;
   }
 
-  if (res.status === 401 || res.status === 403) {
-    throw new CgcError("parse.bot rejected the API key", 502);
-  }
-  if (res.status === 402) {
-    throw new CgcError("parse.bot credits exhausted", 502);
-  }
-  if (res.status === 429) {
-    throw new CgcError("CGC lookup rate limit reached. Try again later.", 429);
-  }
-  if (!res.ok) {
-    throw new CgcError(`CGC lookup service returned ${res.status}`, 502);
-  }
-
-  const body = (await res.json()) as { status?: string; data?: T; error?: string };
-  if (body.status !== "success" || !body.data) {
-    throw new CgcError(body.error || "CGC lookup returned no data", 502);
-  }
-  return body.data;
+  throw lastError;
 }
 
 async function fetchCert(certNumber: string): Promise<CgcCert> {
@@ -254,31 +291,61 @@ async function fetchCert(certNumber: string): Promise<CgcCert> {
   return cert;
 }
 
+const EMPTY_POPULATION: CgcPopulation = { total: null, higher: null };
+
+// Population is reported as a descending ladder ("Perfect 10", "Pristine 10",
+// "Gem Mint 10", "Mint+ 9.5", "9", …) with no count-higher field, so we derive
+// it: everything above this card's own rung.
+//
+// Matching is by label first because the three distinct 10-tiers all reduce to
+// the number 10 — a numeric match alone would be ambiguous. The numeric tail is
+// only a fallback for rungs like "9" where the label IS the number.
+function countHigher(ladder: CgcGradeCount[], grade: string | undefined): number | null {
+  if (!grade || ladder.length === 0) return null;
+
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+  const target = norm(grade);
+
+  let index = ladder.findIndex((r) => norm(r.grade) === target);
+
+  if (index === -1) {
+    const targetNum = grade.match(/(\d+(?:\.\d)?)\s*$/)?.[1];
+    if (targetNum) {
+      index = ladder.findIndex((r) => r.grade.match(/(\d+(?:\.\d)?)\s*$/)?.[1] === targetNum);
+    }
+  }
+  if (index === -1) return null;
+
+  return ladder.slice(0, index).reduce((sum, r) => sum + (r.count || 0), 0);
+}
+
+interface CgcPopulationResponse {
+  population_total?: number;
+  grade_ladder?: CgcGradeCount[];
+}
+
 /**
- * Population is a separate billed call, and its payload isn't part of the
- * documented cert schema — probe defensively and degrade to nulls rather than
- * failing the whole lookup over a shape change.
+ * Population is a separate billed call AND a slow one (~27s upstream), so it is
+ * cached for a day. Unlike cert data it does change — more copies get graded —
+ * which is why it lives in the TTL cache rather than cgc_cert_cache.
  */
-async function fetchPopulation(certNumber: string): Promise<CgcPopulation> {
+async function fetchPopulation(certNumber: string, grade: string | undefined): Promise<CgcPopulation> {
   try {
-    const data = await parseBotGet<Record<string, unknown>>("get_card_population", {
-      cert_number: certNumber,
+    return await cached<CgcPopulation>(`cgc:pop:${certNumber}`, 86_400, async () => {
+      const data = await parseBotGet<CgcPopulationResponse>("get_card_population", {
+        cert_number: certNumber,
+      });
+      const ladder = Array.isArray(data.grade_ladder) ? data.grade_ladder : [];
+      return {
+        total:  typeof data.population_total === "number" ? data.population_total : null,
+        higher: countHigher(ladder, grade),
+        ...(ladder.length > 0 && { ladder }),
+      };
     });
-    const num = (...keys: string[]): number | null => {
-      for (const k of keys) {
-        const v = data[k];
-        if (typeof v === "number") return v;
-        if (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v))) return Number(v);
-      }
-      return null;
-    };
-    return {
-      total:  num("total_population", "total", "total_graded", "population"),
-      higher: num("count_higher", "higher", "graded_higher"),
-    };
   } catch (err) {
+    // A population failure must not sink the cert lookup itself.
     logger.warn({ err, certNumber }, "CGC population lookup failed — returning nulls");
-    return { total: null, higher: null };
+    return EMPTY_POPULATION;
   }
 }
 
@@ -310,15 +377,11 @@ export async function lookupCert(
     logger.info({ certNumber }, "CGC cert cached");
   }
 
-  const population = opts.population
-    ? await fetchPopulation(certNumber)
-    : { total: null, higher: null };
 
-  return {
-    certNumber,
-    cached,
-    card: await toCardFields(cert),
-    population,
-    raw: cert,
-  };
+  const [card, population] = await Promise.all([
+    toCardFields(cert),
+    opts.population ? fetchPopulation(certNumber, cert.grade) : Promise.resolve(EMPTY_POPULATION),
+  ]);
+
+  return { certNumber, cached, card, population, raw: cert };
 }
