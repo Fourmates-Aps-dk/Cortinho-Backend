@@ -16,8 +16,25 @@ import {
   index,
   uniqueIndex,
   jsonb,
+  pgEnum,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
+
+// ─────────────────────────────────────────────────────────────
+// LEGACY PRISMA ENUMS
+// ─────────────────────────────────────────────────────────────
+// The pre-Drizzle Prisma tables (public."Card", public."User", ...) still
+// live in this database and their columns depend on these types. Nothing in
+// the Drizzle schema uses them -- they are declared only so drizzle-kit sees
+// them as known and stops emitting DROP TYPE on every push. Delete these
+// alongside the Prisma tables.
+export const legacyCardStatus      = pgEnum("CardStatus",      ["COLLECTION","WISHLIST","FOR_SALE","SOLD","TRADED","DRAFT"]);
+export const legacyCategory        = pgEnum("Category",        ["POKEMON","SOCCER","BASKETBALL","FOOTBALL","OTHER"]);
+export const legacyCurrency        = pgEnum("Currency",        ["USD","EUR","GBP","DKK"]);
+export const legacyPriceSource     = pgEnum("PriceSource",     ["MANUAL","PRICECHARTING","IMPORT"]);
+export const legacyRole            = pgEnum("Role",            ["USER","ADMIN"]);
+export const legacySealedStatus    = pgEnum("SealedStatus",    ["COLLECTION","FOR_SALE","SOLD"]);
+export const legacyTransactionType = pgEnum("TransactionType", ["BUY","SELL","TRADE"]);
 
 // ─────────────────────────────────────────────────────────────
 // LOOKUP TABLES
@@ -209,6 +226,18 @@ export const psaCertCache = pgTable(
   },
   (t) => ({
     fetchedAtIdx: index("idx_psa_fetched").on(t.fetchedAt),
+  })
+);
+
+export const cgcCertCache = pgTable(
+  "cgc_cert_cache",
+  {
+    certNumber: varchar("cert_number", { length: 64 }).primaryKey(),
+    resultJson: jsonb("result_json").notNull(),
+    fetchedAt:  timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    fetchedAtIdx: index("idx_cgc_fetched").on(t.fetchedAt),
   })
 );
 

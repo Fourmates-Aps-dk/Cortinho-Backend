@@ -12,6 +12,7 @@ import uploadRouter       from "./upload.js";
 import pricesRouter       from "./prices.js";
 import ebayRouter         from "./ebay.js";
 import psaRouter          from "./psa.js";
+import cgcRouter          from "./cgc.js";
 
 const v1 = Router();
 
@@ -35,5 +36,6 @@ v1.use("/upload",       uploadRouter);
 v1.use("/prices",       pricesRouter);
 v1.use("/ebay",         ebayRouter);
 v1.use("/psa",          psaRouter);
+v1.use("/cgc",          cgcRouter);
 
 export default v1;

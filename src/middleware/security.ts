@@ -2,6 +2,7 @@ import helmet from "helmet";
 import cors from "cors";
 import { env } from "../config/env.js";
 import type { Express } from "express";
+import { logger } from "../logger/index.js";
 
 const allowedOrigins = env.ALLOWED_ORIGINS.split(",").map((o) => o.trim());
 
@@ -38,7 +39,11 @@ export function applySecurityMiddleware(app: Express): void {
         // Native mobile apps and server-to-server calls have no Origin
         if (!origin) return cb(null, true);
         if (allowedOrigins.includes(origin)) return cb(null, true);
-        cb(new Error(`Origin ${origin} not allowed by CORS`));
+        // Reject by withholding the CORS headers, not by throwing. Passing an
+        // Error here reaches the global handler and turns a client-side
+        // condition into a 500 with a stack trace.
+        logger.warn({ origin }, "CORS origin rejected");
+        cb(null, false);
       },
       credentials:     true,   // allow cookies for web
       allowedHeaders:  ["Content-Type", "Authorization", "x-request-id", "x-platform"],

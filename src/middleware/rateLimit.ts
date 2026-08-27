@@ -62,3 +62,16 @@ export const psaLimiter = rateLimit({
   handler,
   skip:             (req) => env.NODE_ENV === "test",
 });
+
+// ── CGC lookup limiter ────────────────────────────────────────
+// CGC goes through parse.bot, which bills per call. Cache hits don't reach it,
+// but cap uncached bursts anyway. 10 req / 1 min per user.
+export const cgcLimiter = rateLimit({
+  windowMs:         env.RATE_LIMIT_WINDOW_MS,
+  max:              env.CGC_RATE_LIMIT_MAX,
+  standardHeaders:  "draft-7",
+  legacyHeaders:    false,
+  keyGenerator:     (req) => req.userId || ipKeyGenerator(req.ip || '0.0.0.0'),
+  handler,
+  skip:             (req) => env.NODE_ENV === "test",
+});

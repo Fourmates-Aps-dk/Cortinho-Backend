@@ -19,6 +19,7 @@ const envSchema = z.object({
   RATE_LIMIT_MAX:       z.coerce.number().default(120),      // requests per window
   AI_RATE_LIMIT_MAX:    z.coerce.number().default(10),       // AI scan is expensive
   PSA_RATE_LIMIT_MAX:   z.coerce.number().default(10),       // PSA free tier is 100 calls/day
+  CGC_RATE_LIMIT_MAX:   z.coerce.number().default(10),       // parse.bot bills per call
 
   // Redis (optional — falls back to in-process memory store)
   REDIS_URL: z.string().optional(),
@@ -26,6 +27,8 @@ const envSchema = z.object({
   // Secrets
   PRICECHARTING_TOKEN: z.string().optional(),
   PSA_API_TOKEN:       z.string().optional(),
+  PARSE_API_KEY:       z.string().optional(),
+  PARSE_CGC_SCRAPER_ID: z.string().default("139b9b93-f52f-4c61-824f-4b9e918d0aa1"),
 });
 
 export type Env = z.infer<typeof envSchema>;

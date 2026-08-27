@@ -23,6 +23,12 @@ const OWNED_TABLES = [
   "sealed_products",
   "sealed_price_history",
   "psa_cert_cache",
+  "cgc_cert_cache",
+  // Views must be listed too — anything filtered out is invisible to
+  // introspection, so push would try to CREATE it again.
+  "v_card_pl",
+  "v_collection_summary",
+  "v_transaction_summary",
 ];
 
 export default {
