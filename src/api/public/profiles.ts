@@ -28,7 +28,7 @@ router.get(
         showValues: true,
         avatarUrl: true,
         createdAt: true,
-        email: true,
+        role: true,
       },
     });
 
@@ -87,7 +87,7 @@ router.get(
         avatarUrl:   user.avatarUrl ?? null,
         memberSince: user.createdAt,
         isFounder:   user.id <= 100,
-        isOwner:     user.email === "noumanmughal0123@gmail.com",
+        isOwner:     user.role === "admin",
       },
       stats: {
         cardCount:  cardsOut.length,
