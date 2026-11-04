@@ -2,6 +2,7 @@
   "name": "cortinho-backend",
   "version": "0.1.0",
   "type": "module",
+  "packageManager": "pnpm@10.32.1",
   "scripts": {
     "dev": "tsx watch server.ts",
     "build": "tsc",
@@ -43,5 +44,10 @@
     "ts-node": "^10.9.2",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }

@@ -2,6 +2,7 @@ import { db } from "../../db.js";
 import { sealedProducts, sealedPriceHistory } from "../../drizzle/schema.js";
 import { eq, and, isNull, desc, count, SQL } from "drizzle-orm";
 import { z } from "zod";
+import { patchSchema } from "../utils/schema.js";
 
 export const createSealedSchema = z.object({
   name:          z.string().min(1).max(256),
@@ -19,7 +20,7 @@ export const createSealedSchema = z.object({
   status:        z.enum(["collection","for_sale","sold"]).default("collection"),
 });
 
-export const updateSealedSchema = createSealedSchema.partial();
+export const updateSealedSchema = patchSchema(createSealedSchema);
 
 export const listSealedSchema = z.object({
   page:     z.coerce.number().int().positive().default(1),

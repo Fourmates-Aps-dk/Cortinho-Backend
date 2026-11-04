@@ -2,6 +2,7 @@ import { db } from "../../db.js";
 import { transactions, platforms } from "../../drizzle/schema.js";
 import { eq, and, gte, lte, desc, count, SQL, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
+import { patchSchema } from "../utils/schema.js";
 
 export const createTransactionSchema = z.object({
   cardId:          z.number().int().positive().optional(),
@@ -15,7 +16,7 @@ export const createTransactionSchema = z.object({
   transactionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD"),
 });
 
-export const updateTransactionSchema = createTransactionSchema.partial();
+export const updateTransactionSchema = patchSchema(createTransactionSchema);
 
 export const listTransactionsSchema = z.object({
   page:            z.coerce.number().int().positive().default(1),

@@ -4,6 +4,7 @@ import { eq, and, isNull, desc, ilike, or, SQL, count } from "drizzle-orm";
 import { cache, CacheKey } from "../cache/index.js";
 import type { NewCard } from "../../drizzle/schema.js";
 import { z } from "zod";
+import { patchSchema } from "../utils/schema.js";
 
 // ── Schemas ───────────────────────────────────────────────────
 
@@ -37,7 +38,7 @@ export const createCardSchema = z.object({
   status:            z.enum(["collection","wishlist","for_sale","sold","traded","draft"]).default("collection"),
 });
 
-export const updateCardSchema = createCardSchema.partial();
+export const updateCardSchema = patchSchema(createCardSchema);
 
 export const listCardsSchema = z.object({
   page:     z.coerce.number().int().positive().default(1),
