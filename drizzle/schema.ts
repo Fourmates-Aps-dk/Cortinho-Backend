@@ -110,6 +110,7 @@ export const cards = pgTable(
     // ── Acquisition / Valuation ────────────────────────────────
     purchasePrice:     numeric("purchase_price",   { precision: 12, scale: 2 }),
     currentValue:      numeric("current_value",    { precision: 12, scale: 2 }),
+    targetPrice:       numeric("target_price",     { precision: 12, scale: 2 }), // wishlist alert threshold
     purchaseDate:      date("purchase_date"),
     acquisitionMethod: varchar("acquisition_method", { length: 16 }),
     priceSource:       varchar("price_source", { length: 256 }),

@@ -1,6 +1,6 @@
 import { db } from "../../db.js";
 import { cards, priceHistory } from "../../drizzle/schema.js";
-import { eq, and, isNull, desc, ilike, or, SQL, count } from "drizzle-orm";
+import { eq, and, isNull, desc, ilike, or, SQL, count, sql } from "drizzle-orm";
 import { cache, CacheKey } from "../cache/index.js";
 import type { NewCard } from "../../drizzle/schema.js";
 import { z } from "zod";
@@ -27,6 +27,7 @@ export const createCardSchema = z.object({
   certNumber:        z.string().max(64).optional(),
   condition:         z.enum(["raw","poor","fair","good","very_good","excellent","near_mint","mint","gem_mint"]).optional(),
   purchasePrice:     z.number().min(0).optional(),
+  targetPrice:       z.number().min(0).nullable().optional(),
   currentValue:      z.number().min(0).optional(),
   purchaseDate:      z.string().optional(),       // YYYY-MM-DD
   acquisitionMethod: z.enum(["bought","pulled","trade","gift","other"]).optional(),
@@ -83,6 +84,11 @@ export async function listCards(userId: number, input: ListCardsInput) {
   const [rows, [{ total }]] = await Promise.all([
     db.query.cards.findMany({
       where,
+      // Latest daily eBay median (see jobs/priceSnapshot) — drives wishlist price alerts
+      extras: {
+        marketPrice: sql<string | null>`(SELECT ph.value FROM ${priceHistory} ph WHERE ph.card_id = "cards"."id"
+          AND ph.source = 'ebay_auto' ORDER BY ph.recorded_at DESC LIMIT 1)`.as("market_price"),
+      },
       limit:  input.pageSize,
       offset,
       orderBy: (t, { asc, desc }) =>

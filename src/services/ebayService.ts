@@ -66,23 +66,30 @@ export interface PriceLookupResult {
   listings: Array<{ title: string; price: number; url: string }>;
 }
 
-export interface GradeFilter { company?: string; value?: string }
+export interface GradeFilter { company?: string; value?: string; year?: string }
 
 type Listing = { title: string; price: number; url: string };
 
 // Titles that are never the card itself
-const NOISE = /\b(reprint|rp|poster|art print|custom|proxy|digital|lot|you pick|pick your|choose|break|sticker|magnet)\b/i;
-const ANY_GRADE = /\b(PSA|BGS|CGC|SGC|TAG|HGA)\s*\d/i;
+const NOISE = /\b(reprint|rp|poster|art print|custom|proxy|digital|lot|you pick|pick your|choose|break|sticker|magnet|anniversary|decade of excellence|looks|like|shirt|tee|hoodie|size [sml]|xl)\b/i;
+
+const GRADE_MENTION = /\b(PSA|BGS|CGC|SGC|TAG|HGA)\s*(\d+(?:\.\d)?)/gi;
+const YEARS = /\b(19[5-9]\d|20[0-3]\d)\b/g;
 
 // Keep listings that are the same card in the same grade. Raw lookups drop slabs.
+// Every grade mentioned in the title must be the target grade, and the title's years must include the card year.
 export function matchListings(listings: Listing[], grade?: GradeFilter): Listing[] {
-  const clean = listings.filter((l) => !NOISE.test(l.title));
-  const company = grade?.company?.replace(/[^a-z]/gi, "");
-  const value = grade?.value ? String(parseFloat(grade.value)).replace(".", "\\.") : "";
-  const exact = company && value && value !== "NaN"
-    ? clean.filter((l) => new RegExp(`\\b${company}\\s*${value}(?![\\d.])`, "i").test(l.title))
-    : clean.filter((l) => !ANY_GRADE.test(l.title));
-  return exact.length ? exact : clean;
+  const company = grade?.company?.replace(/[^a-z]/gi, "").toUpperCase();
+  const value = grade?.value ? parseFloat(grade.value) : NaN;
+  const year = grade?.year?.match(/\d{4}/)?.[0];
+  return listings.filter(({ title }) => {
+    if (NOISE.test(title)) return false;
+    const years = title.match(YEARS);
+    if (year && years && !years.includes(year)) return false;
+    const grades = [...title.matchAll(GRADE_MENTION)];
+    if (!company || Number.isNaN(value)) return grades.length === 0;
+    return grades.length > 0 && grades.every((m) => m[1].toUpperCase() === company && parseFloat(m[2]) === value);
+  });
 }
 
 export function median(nums: number[]): number {
@@ -238,7 +245,7 @@ export const hasEbayCredentials = () =>
 export function lookupPrices(p: PriceSearchParams): Promise<PriceLookupResult> {
   const query = [p.name, p.year, p.setName, p.cardNumber, p.gradeCompany, p.gradeValue].filter(Boolean).join(" ");
   return cached(`ebay:${p.category ?? ""}:${query.toLowerCase()}`, 6 * 3600, () =>
-    searchCardPrices(query, p.category, { company: p.gradeCompany, value: p.gradeValue }));
+    searchCardPrices(query, p.category, { company: p.gradeCompany, value: p.gradeValue, year: p.year }));
 }
 
 // ── eBay listing parser ───────────────────────────────────────

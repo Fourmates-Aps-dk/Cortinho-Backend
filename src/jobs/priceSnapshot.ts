@@ -1,9 +1,9 @@
-// Logs a market value for every collection card once a day so price history fills itself.
+// Logs a market value for every collection and wishlist card once a day so price history fills itself.
 // Runs hourly in small batches to stay inside eBay's daily call limit (Browse: 5,000/day).
 
 import { db } from "../../db.js";
 import { cards, gradingCompanies, priceHistory } from "../../drizzle/schema.js";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { lookupPrices, hasEbayCredentials } from "../services/ebayService.js";
 import { logger } from "../logger/index.js";
 
@@ -22,7 +22,7 @@ export async function runPriceSnapshot(batch = BATCH) {
     .leftJoin(gradingCompanies, eq(gradingCompanies.id, cards.gradeCompanyId))
     .where(and(
       isNull(cards.deletedAt),
-      eq(cards.status, "collection"),
+      inArray(cards.status, ["collection", "wishlist"]),
       sql`NOT EXISTS (SELECT 1 FROM ${priceHistory} ph WHERE ph.card_id = ${cards.id}
             AND ph.source = ${AUTO_SOURCE} AND ph.recorded_at > NOW() - INTERVAL '20 hours')`,
     ))
@@ -52,7 +52,12 @@ export async function runPriceSnapshot(batch = BATCH) {
 // ponytail: in-process timer, single instance only; move to a cron/queue if the API scales out.
 export function startPriceSnapshots() {
   if (!hasEbayCredentials()) return logger.warn("eBay not configured — price snapshots disabled");
-  const tick = () => runPriceSnapshot().catch((err) => logger.error({ err }, "price snapshot crashed"));
+  let running = false;
+  const tick = () => {
+    if (running) return; // a slow run must not overlap the next tick and double-log
+    running = true;
+    runPriceSnapshot().catch((err) => logger.error({ err }, "price snapshot crashed")).finally(() => { running = false; });
+  };
   setTimeout(tick, 60_000).unref();
   setInterval(tick, 60 * 60_000).unref();
 }
