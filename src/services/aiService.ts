@@ -170,3 +170,37 @@ export async function scanCard(input: ScanCardInput): Promise<ScanResult> {
 
   return result;
 }
+
+// ── Listing title → card fields ───────────────────────────────
+// eBay/CSV titles mix the card with marketing noise ("RARE INVESTMENT CARD MVP MINT").
+// Price lookups search by these fields, so a clean split matters more than the raw title.
+
+const TITLE_PROMPT = `You are a trading card expert. Split this marketplace listing title into card fields.
+Return ONLY valid JSON, no markdown:
+{
+  "name": "player or character name only (e.g. \\"Michael Jordan\\", \\"Charizard\\"), proper case, no set/year/number/grade/marketing words",
+  "category": "one of: pokemon | soccer | basketball | football | other (baseball, hockey and others = other)",
+  "year": null or integer (first year of a season like 2023-24 → 2023),
+  "setName": "manufacturer + set (e.g. \\"Topps Chrome\\", \\"Panini Megacracks\\", \\"Base Set\\") or null",
+  "cardNumber": "card number without # (e.g. \\"57\\", \\"014\\", \\"SVP 085\\") or null",
+  "parallel": "parallel/variant (e.g. \\"Refractor\\", \\"Silver\\", \\"Prerelease Stamped\\") or null",
+  "gradeCompany": "PSA | BGS | CGC | SGC | null",
+  "gradeValue": null or number,
+  "isRookie": boolean
+}
+Drop words like rare, investment, MVP, mint, NM, hot, look, graded, card. Use null when unsure, never guess.
+
+Title: `;
+
+const titleSchema = responseSchema.pick({
+  name: true, category: true, year: true, setName: true, cardNumber: true, parallel: true,
+  gradeCompany: true, gradeValue: true, isRookie: true,
+});
+export type ParsedTitle = z.infer<typeof titleSchema>;
+
+export async function parseCardTitle(title: string): Promise<ParsedTitle> {
+  const text = await callGemini([{ text: TITLE_PROMPT + JSON.stringify(title.slice(0, 300)) }]);
+  const parsed = titleSchema.parse(JSON.parse(extractJSON(text)));
+  if (!parsed.name?.trim()) throw new Error("AI could not identify the card name");
+  return parsed;
+}

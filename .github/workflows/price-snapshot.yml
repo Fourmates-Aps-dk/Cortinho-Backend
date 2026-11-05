@@ -1,0 +1,24 @@
+# Hourly trigger for the daily card price snapshots (src/jobs/priceSnapshot.ts).
+# Each call logs up to 40 due cards; cards already priced in the last 20h are skipped.
+# Repo secrets: API_URL (e.g. https://cortinho-backend.onrender.com) and CRON_SECRET (same value as on Render).
+name: Price snapshot
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger snapshot batch
+        env:
+          API_URL: ${{ secrets.API_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        # Render's free tier sleeps; the first request wakes it, so allow a slow start and retry.
+        run: |
+          curl --fail-with-body --silent --show-error \
+            --max-time 120 --retry 3 --retry-delay 30 --retry-all-errors \
+            -X POST -H "Authorization: Bearer $CRON_SECRET" \
+            "$API_URL/internal/price-snapshot"

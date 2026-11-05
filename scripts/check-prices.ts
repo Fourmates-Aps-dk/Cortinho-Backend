@@ -1,6 +1,6 @@
 // Run: npx tsx scripts/check-prices.ts
 import assert from "node:assert/strict";
-import { matchListings, median } from "../src/services/ebayService.js";
+import { matchListings, median, parseTitleRegex } from "../src/services/ebayService.js";
 
 const l = (title: string, price: number) => ({ title, price, url: "" });
 const listings = [
@@ -23,4 +23,9 @@ assert.deepEqual(matchListings(listings).map((x) => x.price), [5000]);
 assert.equal(matchListings(listings, { company: "BGS", value: "9.5" }).length, 0); // never mix grades
 assert.equal(median([1, 3, 1_000_000]), 3);
 assert.equal(median([1, 2, 3, 4]), 2.5);
+const j = parseTitleRegex("1986 FLEER #57 MICHAEL JORDAN PSA 9");
+assert.deepEqual([j.name, j.year, j.setName, j.cardNumber, j.gradeCompany, j.gradeValue], ["Michael Jordan", 1986, "Fleer", "57", "PSA", 9]);
+const h = parseTitleRegex("Erling Haaland RARE TOPPS CHROME INVESTMENT CARD MVP MINT");
+assert.deepEqual([h.name, h.setName], ["Erling Haaland", "Topps Chrome"]);
+assert.equal(parseTitleRegex("Michael Jordan 🙂‍↕️").name, "Michael Jordan");
 console.log("prices ok");

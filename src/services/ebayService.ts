@@ -1,5 +1,6 @@
 import { logger } from "../logger/index.js";
 import { cached } from "../cache/index.js";
+import { parseCardTitle } from "./aiService.js";
 
 const SANDBOX = process.env.EBAY_SANDBOX === "true";
 const EBAY_BASE          = SANDBOX ? "https://api.sandbox.ebay.com" : "https://api.ebay.com";
@@ -15,7 +16,6 @@ const CATEGORY_IDS: Record<string, string> = {
   baseball:   "212",
   soccer:     "261328",
   pokemon:    "183454",
-  other:      "212",
 };
 
 let cachedToken: { token: string; expiresAt: number } | null = null;
@@ -123,16 +123,20 @@ async function ebayGet(token: string, url: string): Promise<{ ok: boolean; statu
   return { ok: res.ok, status: res.status, data };
 }
 
-async function fetchMarketplaceInsights(token: string, query: string, categoryId: string): Promise<any[] | null> {
-  const params = new URLSearchParams({ q: query, category_ids: categoryId, limit: "20" });
+// Unknown category → search all of eBay rather than guessing a wrong category
+const searchParams = (query: string, categoryId?: string) =>
+  new URLSearchParams({ q: query, limit: "20", ...(categoryId && { category_ids: categoryId }) });
+
+async function fetchMarketplaceInsights(token: string, query: string, categoryId?: string): Promise<any[] | null> {
+  const params = searchParams(query, categoryId);
   const { ok, status, data } = await ebayGet(token, `${EBAY_INSIGHTS_URL}?${params}`);
   if (status === 401 || status === 403 || status === 404) return null; // scope/sandbox not available — caller will fall back
   if (!ok) throw new Error(`eBay Insights HTTP ${status}: ${JSON.stringify(data).slice(0, 200)}`);
   return data.itemSales ?? [];
 }
 
-async function fetchBrowse(token: string, query: string, categoryId: string): Promise<any[]> {
-  const params = new URLSearchParams({ q: query, category_ids: categoryId, limit: "20" });
+async function fetchBrowse(token: string, query: string, categoryId?: string): Promise<any[]> {
+  const params = searchParams(query, categoryId);
   const { ok, status, data } = await ebayGet(token, `${EBAY_BROWSE_URL}?${params}`);
   if (!ok) throw new Error(`eBay Browse HTTP ${status}: ${JSON.stringify(data).slice(0, 200)}`);
   return data.itemSummaries ?? [];
@@ -144,7 +148,7 @@ export async function searchCardPrices(
   grade?: GradeFilter
 ): Promise<PriceLookupResult> {
   const token = await getEbayToken();
-  const categoryId = category ? (CATEGORY_IDS[category.toLowerCase()] ?? "212") : "212";
+  const categoryId = CATEGORY_IDS[(category && category !== "other" ? category : inferCategory(query) ?? "").toLowerCase()];
   const parts = query.trim().split(/\s+/);
 
   let items: any[] = [];
@@ -263,6 +267,8 @@ export interface ListingImport {
   gradeCompany: string | null;
   gradeValue:   number | null;
   category:     string | null;
+  setName:      string | null;
+  cardNumber:   string | null;
 }
 
 function extractItemId(url: string): string | null {
@@ -287,12 +293,50 @@ function inferGrade(title: string): { gradeCompany: string | null; gradeValue: n
   return { gradeCompany: m[1].toUpperCase(), gradeValue: parseFloat(m[2]) };
 }
 
-function stripGradeAndNoise(title: string): string {
-  return title
-    .replace(/\b(PSA|BGS|CGC|SGC)\s+\d+(?:\.\d)?\b/gi, "")
-    .replace(/\b(graded|rookie|rc|sp|ssp|holo|foil|refractor|prizm|auto|autograph|patch|rpa|numbered|\/\d+)\b/gi, "")
+// Known manufacturer/set names, longest first so "Topps Chrome" wins over "Topps"
+const SETS = ["Topps Chrome", "Topps Finest", "Topps Now", "Topps", "Panini Prizm", "Donruss Optic", "Donruss", "Prizm", "Select",
+  "Mosaic", "Bowman Chrome", "Bowman Draft", "Bowman", "Fleer", "Upper Deck Young Guns", "Upper Deck", "Megacracks", "Base Set",
+  "Jungle", "Fossil", "Team Rocket", "Hidden Fates", "Evolving Skies", "Phantasmal Flames", "Score", "Hoops", "Leaf"];
+const TITLE_NOISE = /\b(rare|investment|card|cards|mvp|mint|nm|near mint|gem|hot|graded|look|wow|l@@k|rc|rookie|pokemon|pok[eé]mon|tcg|playing|pristine|old|new|english|japanese|japan|stamped|promo|prerelease|panini|la liga|ea sports|ssp|sp|invest)\b/gi;
+
+const titleCase = (t: string) => (t === t.toUpperCase() ? t.toLowerCase().replace(/\b\p{L}/gu, (c) => c.toUpperCase()) : t);
+
+// Regex fallback for splitting a listing title into card fields (used when Gemini is unavailable).
+export function parseTitleRegex(raw: string) {
+  const title = raw.replace(/[\p{Extended_Pictographic}\u200d\ufe0f]/gu, "").trim();
+  const { gradeCompany, gradeValue } = inferGrade(title);
+  const year = title.match(/\b(19[5-9]\d|20[0-3]\d)\b/)?.[1];
+  const cardNumber = title.match(/#\s*([A-Z]{0,4}\d+[A-Z]?)\b/i)?.[1] ?? null;
+  const set = SETS.find((x) => new RegExp(`\\b${x}\\b`, "i").test(title)) ?? null;
+  const name = title
+    .replace(/\b(PSA|BGS|CGC|SGC)\s*\d+(?:\.\d)?\b/gi, " ")
+    .replace(/\b(19|20)\d{2}(?:[-/]\d{2,4})?\b/g, " ")
+    .replace(/#\s*[A-Z]{0,4}\d+[A-Z]?\b/gi, " ")
+    .replace(set ? new RegExp(`\\b${set}\\b`, "gi") : /$^/, " ")
+    .replace(TITLE_NOISE, " ")
+    .replace(/[()\[\]|,!-]+/g, " ")
     .replace(/\s{2,}/g, " ")
     .trim();
+  return {
+    name: titleCase(name) || titleCase(title),
+    year: year ? parseInt(year) : null,
+    setName: set,
+    cardNumber,
+    category: inferCategory(title),
+    gradeCompany,
+    gradeValue,
+  };
+}
+
+// Gemini first (handles arbitrary titles), regex fallback if the AI call fails.
+export async function parseTitle(title: string) {
+  try {
+    const ai = await parseCardTitle(title);
+    return { ...ai, category: ai.category === "other" ? inferCategory(title) ?? "other" : ai.category };
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : err }, "AI title parse failed, using regex");
+    return parseTitleRegex(title);
+  }
 }
 
 // ── /b/ Browse product page parser ───────────────────────────
@@ -345,19 +389,14 @@ async function parseBrowseProductUrl(url: string): Promise<ListingImport> {
   const listingUrl  = first?.itemWebUrl ?? url;
   const itemId      = first?.itemId ?? "";
 
-  const { gradeCompany, gradeValue } = inferGrade(title);
-  const category = inferCategory(title) ?? inferCategoryFromId(categoryId);
-  const cleanName = stripGradeAndNoise(title);
-
-  const currentYear = new Date().getFullYear();
-  const yearFromTitle = title.match(/\b(19[5-9]\d|20[0-2]\d)\b/)?.[1];
-  const resolvedYear = yearFromTitle ? parseInt(yearFromTitle) : (year ? parseInt(year) : null);
+  const card = await parseTitle(title);
+  const resolvedYear = card.year ?? (year ? parseInt(year) : null);
 
   logger.info({ slug, title, price, items: items.length }, "eBay browse product parsed");
 
   return {
     title,
-    name:         cleanName || name,
+    name:         card.name || name,
     year:         resolvedYear,
     price,
     currency:     first?.price?.currency ?? "USD",
@@ -365,9 +404,11 @@ async function parseBrowseProductUrl(url: string): Promise<ListingImport> {
     imageBackUrl: null,
     itemId,
     listingUrl,
-    gradeCompany,
-    gradeValue,
-    category,
+    gradeCompany: card.gradeCompany,
+    gradeValue:   card.gradeValue,
+    category:     card.category ?? inferCategoryFromId(categoryId),
+    setName:      card.setName,
+    cardNumber:   card.cardNumber,
   };
 }
 
@@ -411,29 +452,24 @@ export async function parseEbayListing(url: string): Promise<ListingImport> {
     ...(item.additionalImages ?? []).map((i: any) => i.imageUrl),
   ].filter(Boolean);
 
-  // Year: 4-digit number between 1950 and current year + 1
-  const currentYear = new Date().getFullYear();
-  const yearMatch   = title.match(/\b(19[5-9]\d|20[0-2]\d)\b/);
-  const year        = yearMatch ? parseInt(yearMatch[1]) : null;
+  const card = await parseTitle(title);
 
-  const { gradeCompany, gradeValue } = inferGrade(title);
-  const category = inferCategory(title);
-  const name     = stripGradeAndNoise(title);
-
-  logger.info({ itemId, title, year, price, gradeCompany }, "eBay listing parsed");
+  logger.info({ itemId, title, card, price }, "eBay listing parsed");
 
   return {
     title,
-    name,
-    year,
+    name:         card.name ?? title,
+    year:         card.year,
     price,
     currency:     item.price?.currency ?? "USD",
     imageUrl:     images[0] ?? null,
     imageBackUrl: images[1] ?? null,
     itemId,
     listingUrl:   item.itemWebUrl ?? url,
-    gradeCompany,
-    gradeValue,
-    category,
+    gradeCompany: card.gradeCompany,
+    gradeValue:   card.gradeValue,
+    category:     card.category,
+    setName:      card.setName,
+    cardNumber:   card.cardNumber,
   };
 }

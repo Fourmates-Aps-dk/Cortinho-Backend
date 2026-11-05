@@ -6,6 +6,7 @@ import { cards, gradingCompanies, priceHistory } from "../../drizzle/schema.js";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { lookupPrices, hasEbayCredentials } from "../services/ebayService.js";
 import { logger } from "../logger/index.js";
+import { env } from "../config/env.js";
 
 const BATCH = 40;
 const MIN_SAMPLE = 3;
@@ -49,15 +50,22 @@ export async function runPriceSnapshot(batch = BATCH) {
   logger.info({ due: due.length, logged }, "price snapshot run");
 }
 
-// ponytail: in-process timer, single instance only; move to a cron/queue if the API scales out.
+// One run at a time per process: a slow run must not overlap the next trigger and double-log.
+let running = false;
+export function triggerPriceSnapshot(): boolean {
+  if (running) return false;
+  running = true;
+  runPriceSnapshot()
+    .catch((err) => logger.error({ err }, "price snapshot crashed"))
+    .finally(() => { running = false; });
+  return true;
+}
+
+// Fallback for local dev. In production an external cron (GitHub Actions → POST /internal/price-snapshot)
+// triggers runs, because Render's free tier sleeps and in-process timers stop with it.
 export function startPriceSnapshots() {
   if (!hasEbayCredentials()) return logger.warn("eBay not configured — price snapshots disabled");
-  let running = false;
-  const tick = () => {
-    if (running) return; // a slow run must not overlap the next tick and double-log
-    running = true;
-    runPriceSnapshot().catch((err) => logger.error({ err }, "price snapshot crashed")).finally(() => { running = false; });
-  };
-  setTimeout(tick, 60_000).unref();
-  setInterval(tick, 60 * 60_000).unref();
+  if (env.CRON_SECRET) return logger.info("CRON_SECRET set — price snapshots run from the external cron");
+  setTimeout(triggerPriceSnapshot, 60_000).unref();
+  setInterval(triggerPriceSnapshot, 60 * 60_000).unref();
 }

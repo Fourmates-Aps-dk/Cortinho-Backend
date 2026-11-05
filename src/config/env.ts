@@ -28,6 +28,7 @@ const envSchema = z.object({
   PRICECHARTING_TOKEN: z.string().optional(),
   PSA_API_TOKEN:       z.string().optional(),
   PARSE_API_KEY:       z.string().optional(),
+  CRON_SECRET:         z.string().min(32).optional(), // shared secret for POST /internal/price-snapshot
   PARSE_CGC_SCRAPER_ID: z.string().default("139b9b93-f52f-4c61-824f-4b9e918d0aa1"),
 });
 

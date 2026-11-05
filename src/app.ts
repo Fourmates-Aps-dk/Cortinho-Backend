@@ -10,6 +10,7 @@ import v1Router                   from "./api/v1/router.js";
 import publicProfilesRouter        from "./api/public/profiles.js";
 import publicCompsRouter           from "./api/public/comps.js";
 import { clerkWebhookHandler }    from "./webhooks/clerk.js";
+import { cronRouter }             from "./api/internal/cron.js";
 
 export function createApp() {
   const app = express();
@@ -56,6 +57,9 @@ export function createApp() {
   app.get("/health", (_req, res) => {
     res.json({ ok: true, uptime: process.uptime(), ts: new Date().toISOString() });
   });
+
+  // ── Cron triggers (shared secret) ────────────────────────
+  app.use("/internal", cronRouter);
 
   // ── Public (no auth) ─────────────────────────────────────
   app.use("/api/public/u", publicProfilesRouter);
