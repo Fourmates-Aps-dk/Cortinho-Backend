@@ -3,12 +3,12 @@ import { z } from "zod";
 import { asyncHandler } from "../../middleware/errorHandler.js";
 import { sendSuccess, sendError } from "../../utils/response.js";
 import { ErrorCode } from "../../types/api.js";
-import { searchCardPrices } from "../../services/ebayService.js";
+import { lookupPrices, hasEbayCredentials } from "../../services/ebayService.js";
 import { logger } from "../../logger/index.js";
 
 const router = Router();
 
-const querySchema = z.object({
+export const querySchema = z.object({
   name:         z.string().min(2).max(100),
   year:         z.string().optional(),
   set:          z.string().optional(),
@@ -26,22 +26,16 @@ router.get(
       return sendError(res, 400, ErrorCode.BAD_REQUEST, "name param required (min 2 chars)", req.requestId);
     }
 
-    const hasCredentials = process.env.EBAY_API_TOKEN ||
-      (process.env.EBAY_CLIENT_ID && process.env.EBAY_CLIENT_SECRET);
-    if (!hasCredentials) {
+    if (!hasEbayCredentials()) {
       return sendError(res, 503, ErrorCode.INTERNAL, "Price lookup not configured on this server", req.requestId);
     }
 
     const { name, year, set, cardNumber, gradeCompany, gradeValue, category } = parsed.data;
 
-    // Build the most precise query from all available fields
-    const queryParts = [name, year, set, cardNumber, gradeCompany, gradeValue].filter(Boolean);
-    const query = queryParts.join(" ");
-
-    logger.info({ query, category }, "eBay price lookup");
+    logger.info({ name, category }, "eBay price lookup");
 
     try {
-      const result = await searchCardPrices(query, category);
+      const result = await lookupPrices({ name, year, setName: set, cardNumber, gradeCompany, gradeValue, category });
       sendSuccess(res, result, 200, req.requestId);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Price lookup failed";

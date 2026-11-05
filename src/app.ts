@@ -8,10 +8,12 @@ import { logger }                 from "./logger/index.js";
 import pinoHttp                   from "pino-http";
 import v1Router                   from "./api/v1/router.js";
 import publicProfilesRouter        from "./api/public/profiles.js";
+import publicCompsRouter           from "./api/public/comps.js";
 import { clerkWebhookHandler }    from "./webhooks/clerk.js";
 
 export function createApp() {
   const app = express();
+  app.set("trust proxy", 1); // Render sits one proxy hop in front; needed for per-IP rate limits
 
   // ── Request ID — before everything ───────────────────────
   app.use(requestId);
@@ -57,6 +59,7 @@ export function createApp() {
 
   // ── Public (no auth) ─────────────────────────────────────
   app.use("/api/public/u", publicProfilesRouter);
+  app.use("/api/public/comps", publicCompsRouter);
 
   // ── Versioned API ─────────────────────────────────────────
   app.use("/api/v1", v1Router);

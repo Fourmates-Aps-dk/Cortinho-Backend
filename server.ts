@@ -4,10 +4,12 @@
 import { createApp } from "./src/app.js";
 import { env }       from "./src/config/env.js";
 import { logger }    from "./src/logger/index.js";
+import { startPriceSnapshots } from "./src/jobs/priceSnapshot.js";
 
 const app    = createApp();
 const server = app.listen(env.PORT, () => {
   logger.info({ port: env.PORT, env: env.NODE_ENV }, "Cortinho API started");
+  startPriceSnapshots();
 });
 
 // ── Graceful shutdown ─────────────────────────────────────────

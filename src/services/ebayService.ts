@@ -1,4 +1,5 @@
 import { logger } from "../logger/index.js";
+import { cached } from "../cache/index.js";
 
 const SANDBOX = process.env.EBAY_SANDBOX === "true";
 const EBAY_BASE          = SANDBOX ? "https://api.sandbox.ebay.com" : "https://api.ebay.com";
@@ -55,12 +56,39 @@ async function getEbayToken(): Promise<string> {
 }
 
 export interface PriceLookupResult {
+  medianPrice: number;
   avgPrice: number;
   minPrice: number;
   maxPrice: number;
   sampleSize: number;
   currency: string;
+  source: "sold" | "active";
   listings: Array<{ title: string; price: number; url: string }>;
+}
+
+export interface GradeFilter { company?: string; value?: string }
+
+type Listing = { title: string; price: number; url: string };
+
+// Titles that are never the card itself
+const NOISE = /\b(reprint|rp|poster|art print|custom|proxy|digital|lot|you pick|pick your|choose|break|sticker|magnet)\b/i;
+const ANY_GRADE = /\b(PSA|BGS|CGC|SGC|TAG|HGA)\s*\d/i;
+
+// Keep listings that are the same card in the same grade. Raw lookups drop slabs.
+export function matchListings(listings: Listing[], grade?: GradeFilter): Listing[] {
+  const clean = listings.filter((l) => !NOISE.test(l.title));
+  const company = grade?.company?.replace(/[^a-z]/gi, "");
+  const value = grade?.value ? String(parseFloat(grade.value)).replace(".", "\\.") : "";
+  const exact = company && value && value !== "NaN"
+    ? clean.filter((l) => new RegExp(`\\b${company}\\s*${value}(?![\\d.])`, "i").test(l.title))
+    : clean.filter((l) => !ANY_GRADE.test(l.title));
+  return exact.length ? exact : clean;
+}
+
+export function median(nums: number[]): number {
+  const s = [...nums].sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
 export interface PriceSearchParams {
@@ -105,7 +133,8 @@ async function fetchBrowse(token: string, query: string, categoryId: string): Pr
 
 export async function searchCardPrices(
   query: string,
-  category?: string
+  category?: string,
+  grade?: GradeFilter
 ): Promise<PriceLookupResult> {
   const token = await getEbayToken();
   const categoryId = category ? (CATEGORY_IDS[category.toLowerCase()] ?? "212") : "212";
@@ -177,24 +206,39 @@ export async function searchCardPrices(
         }))
         .filter((l) => l.price > 0);
 
-  if (validListings.length === 0) {
-    return { avgPrice: 0, minPrice: 0, maxPrice: 0, sampleSize: 0, currency: "USD", listings: [] };
+  const source = usedInsights ? "sold" : "active";
+  const matched = matchListings(validListings, grade);
+  if (matched.length === 0) {
+    return { medianPrice: 0, avgPrice: 0, minPrice: 0, maxPrice: 0, sampleSize: 0, currency: "USD", source, listings: [] };
   }
 
-  const prices = validListings.map((l) => l.price);
+  const prices = matched.map((l) => l.price);
   const avg = prices.reduce((a, b) => a + b, 0) / prices.length;
   const currency = usedInsights
     ? (items[0]?.lastSoldPrice?.currency ?? "USD")
     : (items[0]?.price?.currency ?? "USD");
+  const round = (n: number) => Math.round(n * 100) / 100;
 
   return {
-    avgPrice:   Math.round(avg * 100) / 100,
-    minPrice:   Math.min(...prices),
-    maxPrice:   Math.max(...prices),
-    sampleSize: prices.length,
+    medianPrice: round(median(prices)),
+    avgPrice:    round(avg),
+    minPrice:    Math.min(...prices),
+    maxPrice:    Math.max(...prices),
+    sampleSize:  prices.length,
     currency,
-    listings:   validListings.slice(0, 5),
+    source,
+    listings:    [...matched].sort((a, b) => a.price - b.price).slice(0, 8),
   };
+}
+
+export const hasEbayCredentials = () =>
+  Boolean(process.env.EBAY_API_TOKEN || (process.env.EBAY_CLIENT_ID && process.env.EBAY_CLIENT_SECRET));
+
+// Builds the most precise query from the card fields; same card+grade is served from cache for 6h.
+export function lookupPrices(p: PriceSearchParams): Promise<PriceLookupResult> {
+  const query = [p.name, p.year, p.setName, p.cardNumber, p.gradeCompany, p.gradeValue].filter(Boolean).join(" ");
+  return cached(`ebay:${p.category ?? ""}:${query.toLowerCase()}`, 6 * 3600, () =>
+    searchCardPrices(query, p.category, { company: p.gradeCompany, value: p.gradeValue }));
 }
 
 // ── eBay listing parser ───────────────────────────────────────

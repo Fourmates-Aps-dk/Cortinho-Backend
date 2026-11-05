@@ -1,6 +1,6 @@
 import { db } from "../../db.js";
 import { cards, priceHistory } from "../../drizzle/schema.js";
-import { eq, and, isNull, desc, sql, gte } from "drizzle-orm";
+import { eq, and, isNull, desc, sql } from "drizzle-orm";
 
 export async function getCollectionSummary(userId: number) {
   const allCards = await db.query.cards.findMany({
@@ -47,22 +47,22 @@ export async function getPortfolioTimeline(userId: number, days = 90) {
   const since = new Date();
   since.setDate(since.getDate() - days);
 
-  const rows = await db
-    .select({
-      date:  sql<string>`DATE_TRUNC('day', ${priceHistory.recordedAt})::DATE`.as("date"),
-      value: sql<string>`ROUND(SUM(${priceHistory.value}), 2)`.as("value"),
-    })
-    .from(priceHistory)
-    .innerJoin(cards, eq(cards.id, priceHistory.cardId))
-    .where(
-      and(
-        eq(cards.userId, userId),
-        isNull(cards.deletedAt),
-        gte(priceHistory.recordedAt, since)
-      )
+  // Each day = sum of every collection card's latest value known on that day (values carry forward).
+  const rows = await db.execute<{ date: string; value: string }>(sql`
+    WITH user_ph AS (
+      SELECT ph.card_id, ph.value, ph.recorded_at
+      FROM ${priceHistory} ph JOIN ${cards} c ON c.id = ph.card_id
+      WHERE c.user_id = ${userId} AND c.deleted_at IS NULL AND c.status = 'collection'
+    ),
+    days AS (
+      SELECT DISTINCT DATE_TRUNC('day', recorded_at)::date AS d FROM user_ph WHERE recorded_at >= ${since.toISOString()}
     )
-    .groupBy(sql`DATE_TRUNC('day', ${priceHistory.recordedAt})`)
-    .orderBy(sql`DATE_TRUNC('day', ${priceHistory.recordedAt})`);
+    SELECT d::text AS date, ROUND(SUM(v.value), 2)::text AS value
+    FROM days CROSS JOIN LATERAL (
+      SELECT DISTINCT ON (card_id) value FROM user_ph
+      WHERE recorded_at < d + 1 ORDER BY card_id, recorded_at DESC
+    ) v
+    GROUP BY d ORDER BY d`);
 
   return rows.map((r) => ({ date: r.date, value: Number(r.value) }));
 }

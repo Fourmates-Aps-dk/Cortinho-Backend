@@ -75,3 +75,15 @@ export const cgcLimiter = rateLimit({
   handler,
   skip:             (req) => env.NODE_ENV === "test",
 });
+
+// ── Public comps limiter ──────────────────────────────────────
+// Anonymous price search spends our eBay quota. Cache hits are free; 10 req / 1 min per IP.
+export const compsLimiter = rateLimit({
+  windowMs:         env.RATE_LIMIT_WINDOW_MS,
+  max:              10,
+  standardHeaders:  "draft-7",
+  legacyHeaders:    false,
+  keyGenerator:     (req) => ipKeyGenerator(req.ip || '0.0.0.0'),
+  handler,
+  skip:             (req) => env.NODE_ENV === "test",
+});
