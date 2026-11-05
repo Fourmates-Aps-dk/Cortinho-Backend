@@ -63,7 +63,18 @@ export interface PriceLookupResult {
   sampleSize: number;
   currency: string;
   source: "sold" | "active";
+  confidence: Confidence;
   listings: Array<{ title: string; price: number; url: string }>;
+}
+
+export type Confidence = "high" | "medium" | "low";
+// How much to trust a median: few matches or a wide spread means low confidence.
+export function confidenceOf(prices: number[]): Confidence {
+  if (prices.length < 3) return "low";
+  const s = [...prices].sort((a, b) => a - b);
+  const spread = s[Math.floor(s.length * 0.75)] / Math.max(s[Math.floor(s.length * 0.25)], 0.01);
+  if (prices.length >= 8 && spread <= 2) return "high";
+  return spread <= 4 ? "medium" : "low";
 }
 
 export interface GradeFilter { company?: string; value?: string; year?: string }
@@ -220,7 +231,7 @@ export async function searchCardPrices(
   const source = usedInsights ? "sold" : "active";
   const matched = matchListings(validListings, grade);
   if (matched.length === 0) {
-    return { medianPrice: 0, avgPrice: 0, minPrice: 0, maxPrice: 0, sampleSize: 0, currency: "USD", source, listings: [] };
+    return { medianPrice: 0, avgPrice: 0, minPrice: 0, maxPrice: 0, sampleSize: 0, currency: "USD", source, confidence: "low", listings: [] };
   }
 
   const prices = matched.map((l) => l.price);
@@ -238,6 +249,7 @@ export async function searchCardPrices(
     sampleSize:  prices.length,
     currency,
     source,
+    confidence:  confidenceOf(prices),
     listings:    [...matched].sort((a, b) => a.price - b.price).slice(0, 8),
   };
 }

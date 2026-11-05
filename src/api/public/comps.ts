@@ -2,7 +2,7 @@ import { Router } from "express";
 import { asyncHandler } from "../../middleware/errorHandler.js";
 import { sendSuccess, sendError } from "../../utils/response.js";
 import { ErrorCode } from "../../types/api.js";
-import { compsLimiter } from "../../middleware/rateLimit.js";
+import { compsLimiter, compsDailyLimiter } from "../../middleware/rateLimit.js";
 import { lookupPrices, hasEbayCredentials } from "../../services/ebayService.js";
 import { querySchema } from "../v1/prices.js";
 import { logger } from "../../logger/index.js";
@@ -13,6 +13,7 @@ const router = Router();
 router.get(
   "/",
   compsLimiter,
+  compsDailyLimiter,
   asyncHandler(async (req, res) => {
     const parsed = querySchema.safeParse(req.query);
     if (!parsed.success) {

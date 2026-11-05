@@ -101,6 +101,24 @@ export interface ExportRow {
   gainLoss:    number;
 }
 
+type FifoTx = { id: number; type: string; cardId: number | null; transactionDate: string };
+
+// FIFO: each sell consumes the earliest unmatched buy of the same card dated on or before it.
+// Walks every sell in date order (not just the report year) so a buy used by an earlier
+// year's sale is never matched again.
+export function matchFifo<T extends FifoTx>(txs: T[]): Array<{ sell: T; buy: T | null }> {
+  const byDate = [...txs].sort((a, b) => a.transactionDate.localeCompare(b.transactionDate) || a.id - b.id);
+  const buys = byDate.filter((t) => t.type === "buy");
+  const used = new Set<number>();
+  return byDate.filter((t) => t.type === "sell").map((sell) => {
+    const buy = sell.cardId
+      ? buys.find((b) => b.cardId === sell.cardId && !used.has(b.id) && b.transactionDate <= sell.transactionDate) ?? null
+      : null;
+    if (buy) used.add(buy.id);
+    return { sell, buy };
+  });
+}
+
 export async function exportTransactionsCsv(userId: number, year: number): Promise<string> {
   const start = `${year}-01-01`;
   const end   = `${year}-12-31`;
@@ -112,24 +130,11 @@ export async function exportTransactionsCsv(userId: number, year: number): Promi
     with: { card: { columns: { id: true, name: true, setName: true } } },
   });
 
-  const sells = allTx
-    .filter((t) => t.type === "sell" && t.transactionDate >= start && t.transactionDate <= end)
-    .sort((a, b) => a.transactionDate.localeCompare(b.transactionDate));
-
-  const buys = allTx
-    .filter((t) => t.type === "buy")
-    .sort((a, b) => a.transactionDate.localeCompare(b.transactionDate));
-
-  // FIFO matching: for each sell, consume earliest unmatched buy for same cardId
-  const usedBuyIds = new Set<number>();
+  const matches = matchFifo(allTx);
   const rows: ExportRow[] = [];
 
-  for (const sell of sells) {
-    const matchedBuy = sell.cardId
-      ? buys.find((b) => b.cardId === sell.cardId && !usedBuyIds.has(b.id))
-      : null;
-
-    if (matchedBuy) usedBuyIds.add(matchedBuy.id);
+  for (const { sell, buy: matchedBuy } of matches) {
+    if (sell.transactionDate < start || sell.transactionDate > end) continue;
 
     const sellPrice = Number(sell.price);
     const buyPrice  = matchedBuy ? Number(matchedBuy.price) : 0;

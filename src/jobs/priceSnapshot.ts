@@ -7,6 +7,7 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { lookupPrices, hasEbayCredentials } from "../services/ebayService.js";
 import { logger } from "../logger/index.js";
 import { env } from "../config/env.js";
+import { sendWishlistAlerts } from "../services/alertService.js";
 
 const BATCH = 40;
 const MIN_SAMPLE = 3;
@@ -37,10 +38,10 @@ export async function runPriceSnapshot(batch = BATCH) {
         cardNumber: c.cardNumber ?? undefined, category: c.category,
         gradeCompany: c.gradeCompany ?? undefined, gradeValue: c.gradeValue ?? undefined,
       });
-      if (r.sampleSize < MIN_SAMPLE) continue;
+      if (r.sampleSize < MIN_SAMPLE || r.confidence === "low") continue;
       await db.insert(priceHistory).values({
         cardId: c.id, value: String(r.medianPrice), source: AUTO_SOURCE,
-        note: `median of ${r.sampleSize} ${r.source} eBay listings`,
+        note: `median of ${r.sampleSize} ${r.source} eBay listings (${r.confidence} confidence)`,
       });
       logged++;
     } catch (err) {
@@ -48,6 +49,7 @@ export async function runPriceSnapshot(batch = BATCH) {
     }
   }
   logger.info({ due: due.length, logged }, "price snapshot run");
+  await sendWishlistAlerts();
 }
 
 // One run at a time per process: a slow run must not overlap the next trigger and double-log.

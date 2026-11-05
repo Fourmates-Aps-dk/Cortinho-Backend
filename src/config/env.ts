@@ -19,6 +19,7 @@ const envSchema = z.object({
   RATE_LIMIT_MAX:       z.coerce.number().default(120),      // requests per window
   AI_RATE_LIMIT_MAX:    z.coerce.number().default(10),       // AI scan is expensive
   PSA_RATE_LIMIT_MAX:   z.coerce.number().default(10),       // PSA free tier is 100 calls/day
+  COMPS_DAILY_MAX:      z.coerce.number().default(1000),   // all anonymous /public/comps requests per day
   CGC_RATE_LIMIT_MAX:   z.coerce.number().default(10),       // parse.bot bills per call
 
   // Redis (optional — falls back to in-process memory store)
@@ -28,7 +29,12 @@ const envSchema = z.object({
   PRICECHARTING_TOKEN: z.string().optional(),
   PSA_API_TOKEN:       z.string().optional(),
   PARSE_API_KEY:       z.string().optional(),
+  // Web Push (VAPID). Generate once: npx web-push generate-vapid-keys. Unset = in-app notifications only.
+  VAPID_PUBLIC_KEY:    z.string().optional(),
+  VAPID_PRIVATE_KEY:   z.string().optional(),
+  VAPID_SUBJECT:       z.string().default("mailto:dev@cortinho.app"), // contact for push services
   CRON_SECRET:         z.string().min(32).optional(), // shared secret for POST /internal/price-snapshot
+  SENTRY_DSN:          z.string().url().optional(), // error tracking; disabled when unset
   PARSE_CGC_SCRAPER_ID: z.string().default("139b9b93-f52f-4c61-824f-4b9e918d0aa1"),
 });
 

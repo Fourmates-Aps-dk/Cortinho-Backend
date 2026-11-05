@@ -1,6 +1,7 @@
 // Entrypoint — binds the app to a port and handles graceful shutdown.
 // Signals: SIGTERM (Docker/Kubernetes stop), SIGINT (Ctrl-C dev).
 
+import "./instrument.js"; // must stay first
 import { createApp } from "./src/app.js";
 import { env }       from "./src/config/env.js";
 import { logger }    from "./src/logger/index.js";

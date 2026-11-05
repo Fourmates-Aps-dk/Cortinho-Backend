@@ -5,12 +5,61 @@ import { sendSuccess, sendError } from "../../utils/response.js";
 import { ErrorCode } from "../../types/api.js";
 import {
   listCards, getCard, createCard, updateCard, softDeleteCard,
-  getPriceHistory, logPrice, bulkCreateCards,
+  getPriceHistory, logPrice, bulkCreateCards, bulkUpdateCards, bulkSoftDeleteCards,
   createCardSchema, updateCardSchema, listCardsSchema,
 } from "../../services/cardService.js";
 import { z } from "zod";
+import { aiLimiter } from "../../middleware/rateLimit.js";
+import { tidyCards } from "../../services/tidyService.js";
 
 const router = Router();
+
+// ── Multi-card routes (declared before /:id so "bulk"/"tidy" aren't parsed as ids) ──
+
+const idsSchema = z.array(z.number().int().positive()).min(1).max(500);
+
+// POST /v1/cards/tidy — AI preview of name clean-ups (nothing saved)
+router.post(
+  "/tidy",
+  aiLimiter,
+  asyncHandler(async (req, res) => {
+    sendSuccess(res, await tidyCards({ userId: req.dbUserId!, apply: false }), 200, req.requestId);
+  })
+);
+
+// POST /v1/cards/tidy/apply — saves exactly the previewed patches the user kept
+const tidyPatchSchema = createCardSchema.pick({ name: true, year: true, setName: true, cardNumber: true, parallel: true, category: true }).partial();
+router.post(
+  "/tidy/apply",
+  validate(z.object({ changes: z.array(z.object({ id: z.number().int().positive(), patch: tidyPatchSchema })).min(1).max(100) })),
+  asyncHandler(async (req, res) => {
+    let updated = 0;
+    for (const c of req.body.changes as Array<{ id: number; patch: z.infer<typeof tidyPatchSchema> }>) {
+      if (await updateCard(req.dbUserId!, c.id, c.patch)) updated++;
+    }
+    sendSuccess(res, { updated }, 200, req.requestId);
+  })
+);
+
+// PATCH /v1/cards/bulk — { ids, patch: { status?, isPublic? } }
+router.patch(
+  "/bulk",
+  validate(z.object({ ids: idsSchema, patch: updateCardSchema.pick({ status: true, isPublic: true }) })),
+  asyncHandler(async (req, res) => {
+    const updated = await bulkUpdateCards(req.dbUserId!, req.body.ids, req.body.patch);
+    sendSuccess(res, { updated }, 200, req.requestId);
+  })
+);
+
+// POST /v1/cards/bulk-delete — { ids } (soft delete)
+router.post(
+  "/bulk-delete",
+  validate(z.object({ ids: idsSchema })),
+  asyncHandler(async (req, res) => {
+    const deleted = await bulkSoftDeleteCards(req.dbUserId!, req.body.ids);
+    sendSuccess(res, { deleted }, 200, req.requestId);
+  })
+);
 
 // GET /v1/cards
 router.get(

@@ -67,10 +67,10 @@ router.get(
     const results = await Promise.all(GRADES.map(async ({ label, ...grade }) => {
       try {
         const r: PriceLookupResult = await lookupPrices({ ...card, setName: set, ...grade });
-        return { label, medianPrice: r.medianPrice, sampleSize: r.sampleSize, currency: r.currency, source: r.source };
+        return { label, medianPrice: r.medianPrice, sampleSize: r.sampleSize, currency: r.currency, source: r.source, confidence: r.confidence };
       } catch (err) {
         logger.warn({ err, label }, "by-grade lookup failed");
-        return { label, medianPrice: 0, sampleSize: 0, currency: "USD", source: "active" as const };
+        return { label, medianPrice: 0, sampleSize: 0, currency: "USD", source: "active" as const, confidence: "low" as const };
       }
     }));
     sendSuccess(res, results, 200, req.requestId);

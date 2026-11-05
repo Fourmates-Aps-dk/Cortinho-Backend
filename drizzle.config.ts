@@ -24,6 +24,8 @@ const OWNED_TABLES = [
   "sealed_price_history",
   "psa_cert_cache",
   "cgc_cert_cache",
+  "notifications",
+  "push_subscriptions",
   // Views must be listed too — anything filtered out is invisible to
   // introspection, so push would try to CREATE it again.
   "v_card_pl",

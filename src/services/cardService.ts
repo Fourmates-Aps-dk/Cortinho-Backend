@@ -1,6 +1,6 @@
 import { db } from "../../db.js";
 import { cards, priceHistory } from "../../drizzle/schema.js";
-import { eq, and, isNull, desc, ilike, or, SQL, count, sql } from "drizzle-orm";
+import { eq, and, isNull, desc, ilike, or, SQL, count, sql, inArray } from "drizzle-orm";
 import { cache, CacheKey } from "../cache/index.js";
 import type { NewCard } from "../../drizzle/schema.js";
 import { z } from "zod";
@@ -185,7 +185,8 @@ export async function updateCard(userId: number, cardId: number, input: UpdateCa
 
   const [updated] = await db
     .update(cards)
-    .set({ ...input, updatedAt: new Date() } as any)
+    // A new target re-arms the wishlist alert
+    .set({ ...input, ...(input.targetPrice !== undefined && { targetAlertedAt: null }), updatedAt: new Date() } as any)
     .where(and(eq(cards.id, cardId), eq(cards.userId, userId)))
     .returning();
 
@@ -205,6 +206,27 @@ export async function updateCard(userId: number, cardId: number, input: UpdateCa
   ]);
 
   return updated;
+}
+
+export async function bulkUpdateCards(userId: number, ids: number[], patch: Pick<UpdateCardInput, "status" | "isPublic">) {
+  if (patch.status === undefined && patch.isPublic === undefined) return 0;
+  const rows = await db
+    .update(cards)
+    .set({ ...patch, updatedAt: new Date() })
+    .where(and(inArray(cards.id, ids), eq(cards.userId, userId), isNull(cards.deletedAt)))
+    .returning({ id: cards.id });
+  await cache.del(CacheKey.userCards(userId));
+  return rows.length;
+}
+
+export async function bulkSoftDeleteCards(userId: number, ids: number[]) {
+  const rows = await db
+    .update(cards)
+    .set({ deletedAt: new Date(), updatedAt: new Date() })
+    .where(and(inArray(cards.id, ids), eq(cards.userId, userId), isNull(cards.deletedAt)))
+    .returning({ id: cards.id });
+  await cache.del(CacheKey.userCards(userId));
+  return rows.length;
 }
 
 export async function softDeleteCard(userId: number, cardId: number): Promise<boolean> {

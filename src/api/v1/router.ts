@@ -13,6 +13,7 @@ import pricesRouter       from "./prices.js";
 import ebayRouter         from "./ebay.js";
 import psaRouter          from "./psa.js";
 import cgcRouter          from "./cgc.js";
+import notificationsRouter from "./notifications.js";
 
 const v1 = Router();
 
@@ -32,6 +33,7 @@ v1.use("/stats",        statsRouter);
 v1.use("/sealed",       sealedRouter);
 v1.use("/scan",         scanRouter);
 v1.use("/import",       importRouter);
+v1.use("/notifications", notificationsRouter);
 v1.use("/upload",       uploadRouter);
 v1.use("/prices",       pricesRouter);
 v1.use("/ebay",         ebayRouter);

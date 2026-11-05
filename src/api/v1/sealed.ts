@@ -13,7 +13,7 @@ import {
 const router = Router();
 
 router.get("/",    validate(listSealedSchema, "query"), asyncHandler(async (req, res) => {
-  sendSuccess(res, await listSealed(req.dbUserId!, req.query as any), 200, req.requestId);
+  sendSuccess(res, await listSealed(req.dbUserId!, (req as any).parsedQuery), 200, req.requestId);
 }));
 
 router.get("/:id", validate(idParamSchema, "params"), asyncHandler(async (req, res) => {

@@ -111,6 +111,7 @@ export const cards = pgTable(
     purchasePrice:     numeric("purchase_price",   { precision: 12, scale: 2 }),
     currentValue:      numeric("current_value",    { precision: 12, scale: 2 }),
     targetPrice:       numeric("target_price",     { precision: 12, scale: 2 }), // wishlist alert threshold
+    targetAlertedAt:   timestamp("target_alerted_at", { withTimezone: true }),   // emailed for current target
     purchaseDate:      date("purchase_date"),
     acquisitionMethod: varchar("acquisition_method", { length: 16 }),
     priceSource:       varchar("price_source", { length: 256 }),
@@ -149,6 +150,40 @@ export const priceHistory = pgTable(
   },
   (t) => ({
     cardDateIdx: index("idx_ph_card_date").on(t.cardId, t.recordedAt),
+  })
+);
+
+export const notifications = pgTable(
+  "notifications",
+  {
+    id:        serial("id").primaryKey(),
+    userId:    integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    type:      varchar("type",  { length: 32 }).notNull(),   // e.g. "wishlist_deal", "test"
+    title:     varchar("title", { length: 200 }).notNull(),
+    body:      varchar("body",  { length: 500 }),
+    url:       varchar("url",   { length: 500 }),            // in-app path opened on click
+    readAt:    timestamp("read_at",    { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userCreatedIdx: index("idx_notifications_user_created").on(t.userId, t.createdAt),
+  })
+);
+
+// One row per browser/device that allowed Web Push
+export const pushSubscriptions = pgTable(
+  "push_subscriptions",
+  {
+    id:        serial("id").primaryKey(),
+    userId:    integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    endpoint:  text("endpoint").notNull().unique(),
+    p256dh:    varchar("p256dh", { length: 200 }).notNull(),
+    auth:      varchar("auth",   { length: 100 }).notNull(),
+    userAgent: varchar("user_agent", { length: 300 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index("idx_push_subscriptions_user").on(t.userId),
   })
 );
 

@@ -10,11 +10,11 @@ export const createSealedSchema = z.object({
   setName:       z.string().max(256).optional(),
   productType:   z.string().max(128).optional(),
   language:      z.string().max(64).optional(),
-  year:          z.number().int().min(1900).max(2100).optional(),
+  year:          z.number().int().min(1900).max(2100).nullable().optional(),
   quantity:      z.number().int().min(1).default(1),
-  purchasePrice: z.number().min(0).optional(),
-  currentValue:  z.number().min(0).optional(),
-  purchaseDate:  z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  purchasePrice: z.number().min(0).nullable().optional(),
+  currentValue:  z.number().min(0).nullable().optional(),
+  purchaseDate:  z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   imageUrl:      z.string().url().optional(),
   notes:         z.string().optional(),
   status:        z.enum(["collection","for_sale","sold"]).default("collection"),
@@ -63,7 +63,7 @@ export async function createSealed(userId: number, input: CreateSealedInput) {
     } as any)
     .returning();
 
-  if (input.currentValue) {
+  if (input.currentValue != null) {
     await db.insert(sealedPriceHistory).values({
       sealedProductId: product.id,
       value: String(input.currentValue),
@@ -88,7 +88,7 @@ export async function updateSealed(userId: number, id: number, input: Partial<Cr
     .where(and(eq(sealedProducts.id, id), eq(sealedProducts.userId, userId)))
     .returning();
 
-  if (input.currentValue !== undefined && String(input.currentValue) !== existing.currentValue) {
+  if (input.currentValue != null && String(input.currentValue) !== existing.currentValue) {
     await db.insert(sealedPriceHistory).values({ sealedProductId: id, value: String(input.currentValue), source: "manual" });
   }
 

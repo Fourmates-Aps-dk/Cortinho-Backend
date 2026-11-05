@@ -3,6 +3,7 @@
 // — the interface is identical so no call-site changes are needed.
 
 import { logger } from "../logger/index.js";
+import { redis, KEY_PREFIX } from "./redis.js";
 
 interface CacheStore {
   get<T>(key: string): Promise<T | null>;
@@ -23,7 +24,7 @@ function isExpired(entry: CacheEntry<unknown>): boolean {
   return entry.expiresAt !== null && Date.now() > entry.expiresAt;
 }
 
-export const cache: CacheStore = {
+const memoryCache: CacheStore = {
   async get<T>(key: string): Promise<T | null> {
     const entry = store.get(key) as CacheEntry<T> | undefined;
     if (!entry || isExpired(entry)) {
@@ -48,6 +49,27 @@ export const cache: CacheStore = {
     store.clear();
   },
 };
+
+// ── Redis store (shared across instances) ────────────────────
+const redisCache = (r: NonNullable<typeof redis>): CacheStore => ({
+  async get<T>(key: string) {
+    const raw = await r.get(KEY_PREFIX + key);
+    return raw === null ? null : (JSON.parse(raw) as T);
+  },
+  async set<T>(key: string, value: T, ttlSeconds = 300) {
+    const raw = JSON.stringify(value);
+    await (ttlSeconds > 0 ? r.set(KEY_PREFIX + key, raw, "EX", ttlSeconds) : r.set(KEY_PREFIX + key, raw));
+  },
+  async del(key: string) {
+    await r.del(KEY_PREFIX + key);
+  },
+  async flush() {
+    // Only our keys: the Redis may be shared
+    for await (const keys of r.scanStream({ match: `${KEY_PREFIX}*`, count: 500 })) if ((keys as string[]).length) await r.del(...(keys as string[]));
+  },
+});
+
+export const cache: CacheStore = redis ? redisCache(redis) : memoryCache;
 
 // ── Cache key helpers ─────────────────────────────────────────
 export const CacheKey = {

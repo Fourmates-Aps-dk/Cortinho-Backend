@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from "express";
+import * as Sentry from "@sentry/node";
 import { logger } from "../logger/index.js";
 import { ErrorCode } from "../types/api.js";
 
@@ -17,6 +18,7 @@ export function globalErrorHandler(
   );
 
   const status = (err as any).status ?? (err as any).statusCode ?? 500;
+  if (status >= 500) Sentry.captureException(err); // no-op when Sentry isn't initialised
   res.status(status).json({
     ok:        false,
     error: {
