@@ -20,6 +20,7 @@ for (const c of (await db.select().from(cards).where(isNull(cards.deletedAt))).f
   if (c.year == null && p.year) patch.year = p.year;
   if (!c.setName && p.setName) patch.setName = p.setName;
   if (!c.cardNumber && p.cardNumber) patch.cardNumber = p.cardNumber;
+  if (!c.parallel && "parallel" in p && p.parallel) patch.parallel = p.parallel;
   if (c.category === "other" && p.category && p.category !== "other") patch.category = p.category;
   if (!Object.keys(patch).length) continue;
   console.log(`#${c.id} ${JSON.stringify(c.name)} →`, JSON.stringify(patch));
